@@ -1,12 +1,11 @@
-
 <!DOCTYPE html>
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Web Novel Viewer</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Noto+Sans+KR:wght@400;700&family=Noto+Serif+KR:wght@400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;700&family=Noto+Sans+KR:wght@400;700&family=Gowun+Batang:wght@400;700&display=swap" rel="stylesheet">
     <style>
         :root {
             --font-serif: 'Noto Serif KR', serif;
@@ -21,23 +20,6 @@
             -webkit-tap-highlight-color: transparent;
         }
 
-        /* 뷰어 UI 요소들의 무분별한 텍스트 드래그 선택 차단 */
-        #viewer-top-bar,
-        #viewer-bottom-bar,
-        #viewer-chapter-title,
-        #confirm-modal,
-        #settings-panel,
-        #toc-panel,
-        #bookmark-panel,
-        #library-screen,
-        #bookmark-tooltip,
-        #toast {
-            user-select: none;
-            -webkit-user-select: none;
-            -moz-user-select: none;
-            -ms-user-select: none;
-        }
-
         .viewer-container {
             max-width: 800px;
             margin: 0 auto;
@@ -45,22 +27,15 @@
             padding: 80px 20px 140px 20px;
         }
 
-        /* 글꼴 강제 적용 규칙 */
-        .font-myeongjo, .font-myeongjo * { font-family: var(--font-serif) !important; }
-        .font-gothic, .font-gothic * { font-family: var(--font-sans) !important; }
-        .font-batang, .font-batang * { font-family: var(--font-batang) !important; }
+        .font-myeongjo { font-family: var(--font-serif); }
+        .font-gothic { font-family: var(--font-sans); }
+        .font-batang { font-family: var(--font-batang); }
 
         .chapter-content {
             white-space: pre-wrap;
             line-height: 2.1;
             word-break: break-all;
             letter-spacing: -0.01em;
-            position: relative;
-            /* 본문 영역만 드래그 선택이 가능하도록 설정 */
-            user-select: text !important;
-            -webkit-user-select: text !important;
-            -moz-user-select: text !important;
-            -ms-user-select: text !important;
         }
 
         .ui-hidden { transform: translateY(-110%); }
@@ -68,6 +43,17 @@
 
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        #touch-zones-container {
+            position: fixed;
+            inset: 0;
+            z-index: 5;
+            display: flex;
+            pointer-events: none;
+        }
+        .touch-zone { pointer-events: auto; height: 100%; }
+        .side-zone { width: 20%; }
+        .center-zone { width: 60%; }
         
         .overlay {
             background-color: rgba(0, 0, 0, 0.4);
@@ -94,16 +80,6 @@
         
         .modal-enter { transform: scale(0.95); opacity: 0; }
         .modal-active { transform: scale(1); opacity: 1; transition: all 0.2s ease-out; }
-
-        /* 실시간 하이라이트 표시 스타일 */
-        .bookmark-highlight {
-            background-color: rgba(253, 224, 71, 0.4);
-            border-bottom: 2px dashed #eab308;
-        }
-        .viewer-dark-bg .bookmark-highlight {
-            background-color: rgba(234, 179, 8, 0.3);
-            border-bottom: 2px dashed #facc15;
-        }
     </style>
 </head>
 <body class="bg-gray-50 text-gray-900">
@@ -135,25 +111,24 @@
 
     <!-- 뷰어 화면 -->
     <div id="viewer-screen" class="hidden fixed inset-0 z-50 overflow-y-auto no-scrollbar">
+        <div id="touch-zones-container">
+            <div class="touch-zone side-zone" onclick="confirmMove('prev')"></div>
+            <div class="touch-zone center-zone" onclick="toggleUI()"></div>
+            <div class="touch-zone side-zone" onclick="confirmMove('next')"></div>
+        </div>
+
         <nav id="viewer-top-bar" class="fixed top-0 left-0 right-0 bg-white border-b z-30 px-4 h-16 flex justify-between items-center transition-transform duration-300">
             <button onclick="closeViewer()" class="p-2 hover:bg-gray-100 rounded-full transition-colors">
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
             </button>
             <h2 id="viewer-title" class="font-bold truncate text-center flex-1 mx-4 text-gray-800"></h2>
-            <div class="flex items-center gap-1 z-40">
-                <!-- 북마크 목록 보기 버튼 -->
-                <button onclick="toggleBookmarkPanel()" class="p-2 hover:bg-gray-100 rounded-full transition-colors" title="북마크 목록">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></svg>
-                </button>
-                <button onclick="toggleToc()" class="p-2 hover:bg-gray-100 rounded-full transition-colors">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" x2="21" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                </button>
-            </div>
+            <button onclick="toggleToc()" class="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" x2="21" y1="6" y2="6"/><line x1="3" x2="21" y1="12" y2="12"/><line x1="3" x2="21" y1="18" y2="18"/></svg>
+            </button>
         </nav>
 
         <main id="viewer-main" class="viewer-container">
             <div id="viewer-chapter-title" class="text-xl font-bold mb-10 pb-4 border-b"></div>
-            <!-- 성능 향상을 위해 껍데기만 둠 (실제 텍스트는 내부 가공 없이 raw로 삽입됨) -->
             <div id="viewer-text" class="chapter-content"></div>
         </main>
 
@@ -171,7 +146,7 @@
         <div id="confirm-modal" class="fixed inset-0 z-[100] hidden flex items-center justify-center p-6">
             <div class="absolute inset-0 overlay" onclick="closeConfirmModal()"></div>
             <div id="modal-box" class="relative bg-white w-full max-w-xs rounded-3xl p-6 shadow-2xl modal-enter">
-                <h3 id="modal-message" class="text-center font-bold text-gray-900 mb-6 py-4">이전 화로 넘어가시겠습니까?</h3>
+                <h3 id="modal-message" class="text-center font-bold text-gray-900 mb-6 py-4">다음 화로 넘어갈까요?</h3>
                 <div class="flex gap-3">
                     <button onclick="closeConfirmModal()" class="flex-1 py-3 bg-gray-100 text-gray-600 rounded-2xl font-bold">취소</button>
                     <button id="modal-confirm-btn" class="flex-1 py-3 bg-indigo-600 text-white rounded-2xl font-bold shadow-lg shadow-indigo-200">확인</button>
@@ -224,26 +199,6 @@
                 </div>
                 <div id="toc-list" class="flex-1 overflow-y-auto no-scrollbar pb-10"></div>
             </div>
-        </div>
-
-        <!-- 북마크 목록 패널 -->
-        <div id="bookmark-panel" class="fixed inset-0 z-40 hidden">
-            <div class="absolute inset-0 overlay" onclick="toggleBookmarkPanel()"></div>
-            <div class="absolute top-0 right-0 h-full w-[85%] max-w-xs bg-white shadow-2xl flex flex-col text-gray-900">
-                <div class="p-6 border-b flex justify-between items-center sticky top-0 bg-white z-10">
-                    <h3 class="font-black text-xl">북마크 목록</h3>
-                    <button onclick="toggleBookmarkPanel()" class="p-2 text-gray-400 hover:text-gray-900">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                    </button>
-                </div>
-                <div id="bookmark-list" class="flex-1 overflow-y-auto no-scrollbar pb-10 space-y-1 p-4"></div>
-            </div>
-        </div>
-
-        <!-- 모바일 드래그 전용 플로팅 툴팁 -->
-        <div id="bookmark-tooltip" class="absolute z-50 hidden bg-indigo-600 text-white text-xs font-bold px-4 py-2.5 rounded-full shadow-lg cursor-pointer flex items-center gap-1.5 hover:bg-indigo-700 transition-all">
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></svg>
-            북마크 추가
         </div>
     </div>
 
@@ -299,8 +254,6 @@
         let uiVisible = false;
         let scrollStartY = 0;
 
-        let selectedTextInfo = null;
-
         window.onload = async () => {
             await initDB();
             library = await getAllFromDB();
@@ -315,7 +268,6 @@
             document.getElementById('file-upload').onchange = handleFileUpload;
 
             const viewer = document.getElementById('viewer-screen');
-            
             viewer.ontouchstart = (e) => { scrollStartY = e.touches[0].pageY; };
             viewer.ontouchend = (e) => {
                 const dist = e.changedTouches[0].pageY - scrollStartY;
@@ -324,70 +276,7 @@
                 if (pos >= max - 20 && dist < -150) confirmMove('next');
                 if (pos <= 20 && dist > 150) confirmMove('prev');
             };
-
-            // 가로 터치 위치 인식을 통한 화면 전환 및 UI 토글링
-            viewer.onclick = (e) => {
-                if (window.getSelection().toString().trim().length > 0) {
-                    return;
-                }
-
-                if (e.target.closest('#viewer-top-bar') || 
-                    e.target.closest('#viewer-bottom-bar') || 
-                    e.target.closest('#confirm-modal') || 
-                    e.target.closest('#settings-panel') || 
-                    e.target.closest('#toc-panel') || 
-                    e.target.closest('#bookmark-panel') || 
-                    e.target.closest('#bookmark-tooltip') || 
-                    e.target.classList.contains('bookmark-highlight')) {
-                    return;
-                }
-
-                const clickX = e.clientX;
-                const screenWidth = window.innerWidth;
-
-                if (clickX < screenWidth * 0.2) {
-                    confirmMove('prev');
-                } 
-                else if (clickX > screenWidth * 0.8) {
-                    confirmMove('next');
-                } 
-                else {
-                    toggleUI();
-                }
-            };
-
-            viewer.onscroll = () => {
-                if (!currentNovelId) return;
-                const novel = library.find(n => n.id === currentNovelId);
-                if (novel) {
-                    if (!novel.scrollPositions) {
-                        novel.scrollPositions = {};
-                    }
-                    novel.scrollPositions[currentChapterIndex] = viewer.scrollTop;
-                    saveToDB(novel);
-                }
-            };
-
-            // [메모리 최적화]: 과부하를 유발하는 selectionchange 전체 삭제.
-            // 대신 손가락을 완벽하게 뗄 때(touchend, mouseup) 딱 한 번만 현재 선택 영역 유무를 검사
-            viewer.addEventListener('touchend', handleSelectionEnd);
-            viewer.addEventListener('mouseup', handleSelectionEnd);
-
-            viewer.addEventListener('click', (e) => {
-                if (e.target.closest('#bookmark-tooltip') || e.target.closest('.bookmark-highlight')) return;
-                hideBookmarkTooltip();
-            });
-
-            document.getElementById('bookmark-tooltip').onmousedown = (e) => {
-                e.preventDefault(); 
-                addBookmark();
-            };
         };
-
-        // 손가락을 완전히 뗐을 때만 선택 정보 분석 (메모리 누수 원천 차단)
-        function handleSelectionEnd() {
-            setTimeout(handleTextSelection, 50);
-        }
 
         async function handleFileUpload(e) {
             const file = e.target.files[0];
@@ -405,8 +294,6 @@
                     title: file.name.replace('.txt', ''),
                     chapters: chapters,
                     lastReadIndex: 0,
-                    scrollPositions: {}, 
-                    bookmarks: [],       
                     addedAt: new Date().toISOString()
                 };
                 await saveToDB(novel);
@@ -419,6 +306,11 @@
             reader.readAsText(file, "UTF-8");
         }
 
+        /**
+         * 회차 분할 로직 수정
+         * 1. #001 형식의 패턴을 최우선으로 인식
+         * 2. 본문 리스트형(1., 2.) 패턴 제외
+         */
         function splitChapters(text) {
             return new Promise((resolve) => {
                 setTimeout(() => {
@@ -427,10 +319,15 @@
                     let currentBody = [];
                     let currentTitle = "시작";
                     
+                    // 정규식 설명: 
+                    // ^#\d{3,} : 줄 시작이 #과 3자리 이상의 숫자 (예: #001)
+                    // (?:제\s?)?\d+\s?화 : 제1화, 1화 등
+                    // Chapter\s?\d+ : Chapter 1 등
                     const pattern = /^#\d{3,}|^(?:제\s?)?\d+\s?화|^Chapter\s?\d+/i;
 
                     for (let line of lines) {
                         const t = line.trim();
+                        // 패턴에 맞고 제목으로 적절한 길이(60자 이내)인 경우 새로운 회차로 인식
                         if (pattern.test(t) && t.length < 60) {
                             if (currentBody.length > 0 || chapters.length > 0) {
                                 chapters.push({ title: currentTitle, body: currentBody.join('\n').trim() });
@@ -441,10 +338,12 @@
                             currentBody.push(line);
                         }
                     }
+                    // 마지막 회차 추가
                     if (currentBody.length > 0 || currentTitle !== "시작") {
                         chapters.push({ title: currentTitle, body: currentBody.join('\n').trim() });
                     }
 
+                    // 내용이 너무 적은 더미 데이터 필터링
                     const result = chapters.filter(c => c.body.length > 5 || c.title !== "시작");
                     resolve(result.length > 0 ? result : [{ title: "전체", body: text }]);
                 }, 0);
@@ -506,8 +405,7 @@
             document.getElementById('viewer-title').innerText = novel.title;
             document.getElementById('library-screen').classList.add('hidden');
             document.getElementById('viewer-screen').classList.remove('hidden');
-            
-            renderChapter(true);
+            renderChapter();
             uiVisible = false; toggleUI(); 
         }
 
@@ -523,118 +421,17 @@
             renderLibrary();
         }
 
-        // [메모리 최적화]: 회차 로딩 시 무거운 하이라이트 문자열 조립을 배제하고 초고속 순수 텍스트 렌더링으로 변경
-        function renderChapter(shouldRestoreScroll = false) {
+        function renderChapter() {
             const novel = library.find(n => n.id === currentNovelId);
             if (!novel || !novel.chapters[currentChapterIndex]) return;
             const chapter = novel.chapters[currentChapterIndex];
-            
-            document.getElementById('viewer-chapter-title').innerText = chapter.title;
-            
-            // 돔을 고속 드로잉하기 위해 innerText를 사용
+            const titleEl = document.getElementById('viewer-chapter-title');
+            titleEl.innerText = chapter.title;
             document.getElementById('viewer-text').innerText = chapter.body;
-
-            const viewer = document.getElementById('viewer-screen');
-            if (shouldRestoreScroll && novel.scrollPositions && novel.scrollPositions[currentChapterIndex] !== undefined) {
-                setTimeout(() => {
-                    viewer.scrollTop = novel.scrollPositions[currentChapterIndex];
-                }, 50);
-            } else {
-                viewer.scrollTop = 0;
-            }
+            document.getElementById('viewer-screen').scrollTop = 0;
             
             novel.lastReadIndex = currentChapterIndex;
             saveToDB(novel);
-            hideBookmarkTooltip();
-        }
-
-        /**
-         * [메모리 최적화]: 사파리에서 가상 selection 객체가 생성되지 않도록 가볍게 가공
-         */
-        function handleTextSelection() {
-            const selection = window.getSelection();
-            const text = selection.toString().trim();
-            const tooltip = document.getElementById('bookmark-tooltip');
-
-            if (!text || !currentNovelId) {
-                tooltip.classList.add('hidden');
-                selectedTextInfo = null;
-                return;
-            }
-
-            if (selection.rangeCount === 0) return;
-            const range = selection.getRangeAt(0);
-            const textContainer = document.getElementById('viewer-text');
-
-            if (!textContainer.contains(range.commonAncestorContainer)) {
-                tooltip.classList.add('hidden');
-                selectedTextInfo = null;
-                return;
-            }
-
-            // [메모리 최적화]: 크래시를 방지하기 위해 Range의 복제 및 복잡한 오프셋 수치 계산 처리를 완전히 생략하고,
-            // indexOf 구조로 오프셋을 안정화시킵니다.
-            const fullText = textContainer.innerText;
-            const startOffset = fullText.indexOf(text);
-
-            selectedTextInfo = {
-                text: text,
-                charOffset: startOffset !== -1 ? startOffset : 0,
-                chapterIndex: currentChapterIndex
-            };
-
-            const rect = range.getBoundingClientRect();
-            const viewerScreen = document.getElementById('viewer-screen');
-            const scrollTopOffset = viewerScreen.scrollTop;
-
-            const top = rect.top + scrollTopOffset - 46; 
-            const left = rect.left + (rect.width / 2) - 60;
-
-            tooltip.style.top = `${top}px`;
-            tooltip.style.left = `${Math.max(12, left)}px`;
-            tooltip.classList.remove('hidden');
-        }
-
-        function hideBookmarkTooltip() {
-            document.getElementById('bookmark-tooltip').classList.add('hidden');
-            selectedTextInfo = null;
-            // 예외 튕김 방지 처리 추가
-            try {
-                window.getSelection().removeAllRanges();
-            } catch(e) {}
-        }
-
-        function addBookmark() {
-            if (!selectedTextInfo || !currentNovelId) return;
-
-            const novel = library.find(n => n.id === currentNovelId);
-            if (!novel) return;
-
-            if (!novel.bookmarks) novel.bookmarks = [];
-
-            const isDuplicate = novel.bookmarks.some(b => 
-                b.chapterIndex === selectedTextInfo.chapterIndex && 
-                b.text === selectedTextInfo.text
-            );
-
-            if (isDuplicate) {
-                showToast("이미 북마크된 영역입니다.");
-                return;
-            }
-
-            const newBookmark = {
-                id: 'b_' + Date.now(),
-                chapterIndex: selectedTextInfo.chapterIndex,
-                charOffset: selectedTextInfo.charOffset,
-                text: selectedTextInfo.text,
-                createdAt: new Date().toISOString()
-            };
-
-            novel.bookmarks.push(newBookmark);
-            saveToDB(novel);
-
-            hideBookmarkTooltip();
-            showToast("선택한 영역을 북마크했습니다.");
         }
 
         function confirmMove(dir) {
@@ -644,9 +441,10 @@
                     showToast("마지막 화입니다.");
                     return;
                 }
-                openConfirmModal("다음 화로 넘어가시겠습니까?", () => {
+                const nextTitle = novel.chapters[currentChapterIndex+1].title;
+                openConfirmModal(`[${nextTitle}] 다음 화로 이동할까요?`, () => {
                     currentChapterIndex++;
-                    renderChapter(false); 
+                    renderChapter();
                     closeConfirmModal();
                     showToast(`${currentChapterIndex + 1}화 이동`);
                 });
@@ -655,9 +453,10 @@
                     showToast("첫 화입니다.");
                     return;
                 }
-                openConfirmModal("이전 화로 넘어가시겠습니까?", () => {
+                const prevTitle = novel.chapters[currentChapterIndex-1].title;
+                openConfirmModal(`[${prevTitle}] 이전 화로 이동할까요?`, () => {
                     currentChapterIndex--;
-                    renderChapter(false); 
+                    renderChapter();
                     closeConfirmModal();
                     showToast(`${currentChapterIndex + 1}화 이동`);
                 });
@@ -692,23 +491,10 @@
         }
 
         function toggleSettings() { document.getElementById('settings-panel').classList.toggle('hidden'); }
-        
         function toggleToc() { 
             const p = document.getElementById('toc-panel');
             p.classList.toggle('hidden');
-            if(!p.classList.contains('hidden')) {
-                document.getElementById('bookmark-panel').classList.add('hidden');
-                renderToc();
-            }
-        }
-
-        function toggleBookmarkPanel() {
-            const p = document.getElementById('bookmark-panel');
-            p.classList.toggle('hidden');
-            if(!p.classList.contains('hidden')) {
-                document.getElementById('toc-panel').classList.add('hidden');
-                renderBookmarks();
-            }
+            if(!p.classList.contains('hidden')) renderToc();
         }
 
         function renderToc() {
@@ -721,7 +507,7 @@
                 item.className = `w-full text-left px-6 py-5 text-sm transition-all border-l-4 ${isActive ? 'bg-indigo-50 border-indigo-600 text-indigo-700 font-black' : 'border-transparent text-gray-500 hover:bg-gray-50'}`;
                 item.onclick = () => {
                     currentChapterIndex = idx;
-                    renderChapter(false);
+                    renderChapter();
                     toggleToc();
                     if(uiVisible) toggleUI();
                 };
@@ -729,91 +515,6 @@
                 list.appendChild(item);
                 if(isActive) setTimeout(() => item.scrollIntoView({ block: 'start' }), 50);
             });
-        }
-
-        /**
-         * 북마크 목록 패널 렌더링
-         */
-        function renderBookmarks() {
-            const novel = library.find(n => n.id === currentNovelId);
-            const list = document.getElementById('bookmark-list');
-            list.innerHTML = '';
-
-            const bookmarks = novel.bookmarks || [];
-            if (bookmarks.length === 0) {
-                list.innerHTML = `<div class="text-center py-20 text-xs text-gray-400">저장된 북마크가 없습니다.<br>원하는 영역을 드래그한 후 '북마크 추가'를 눌러보세요.</div>`;
-                return;
-            }
-
-            const sortedBookmarks = [...bookmarks].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
-
-            sortedBookmarks.forEach((bm) => {
-                const item = document.createElement('div');
-                const chTitle = novel.chapters[bm.chapterIndex]?.title || `${bm.chapterIndex + 1}화`;
-                
-                item.className = "p-4 bg-gray-50 hover:bg-indigo-50 border-b border-gray-100 rounded-xl transition-all cursor-pointer flex flex-col justify-between gap-2 group relative";
-                
-                // 북마크 클릭 시 실시간 타겟 마킹 스크롤링
-                item.onclick = () => {
-                    currentChapterIndex = bm.chapterIndex;
-                    
-                    // 1. 순수 텍스트 형태로 회차 렌더링 진행
-                    renderChapter(false); 
-                    toggleBookmarkPanel();
-                    if(uiVisible) toggleUI();
-
-                    // 2. [메모리 최적화]: 북마크 지점을 찾아 실시간으로 딱 그 부분만 임시 highlight span 처리
-                    setTimeout(() => {
-                        const textContainer = document.getElementById('viewer-text');
-                        const fullText = textContainer.innerText;
-                        
-                        const targetText = bm.text.trim();
-                        const targetIdx = fullText.indexOf(targetText);
-
-                        if (targetIdx !== -1) {
-                            // 오프셋 앞과 뒤를 가르고 타겟 단락만 span 처리하여 DOM 변경 최소화
-                            const before = fullText.substring(0, targetIdx);
-                            const after = fullText.substring(targetIdx + targetText.length);
-                            textContainer.innerHTML = escapeHtml(before) + `<span id="current-target-highlight" class="bookmark-highlight">${escapeHtml(targetText)}</span>` + escapeHtml(after);
-                            
-                            // 정확한 픽셀 계산 후 부드러운 스크롤 이동
-                            const targetEl = document.getElementById('current-target-highlight');
-                            if (targetEl) {
-                                const rect = targetEl.getBoundingClientRect();
-                                const viewer = document.getElementById('viewer-screen');
-                                const targetScrollTop = viewer.scrollTop + rect.top - (window.innerHeight / 2) + (rect.height / 2);
-                                viewer.scrollTo({
-                                    top: targetScrollTop,
-                                    behavior: 'smooth'
-                                });
-                            }
-                        }
-                    }, 150);
-                };
-
-                item.innerHTML = `
-                    <div class="flex justify-between items-start gap-1">
-                        <span class="text-[10px] text-indigo-600 font-bold tracking-tight">${chTitle}</span>
-                        <button onclick="deleteBookmarkFromPanel('${bm.id}', event)" class="text-gray-300 hover:text-red-500 transition-colors p-1" title="북마크 해제">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                        </button>
-                    </div>
-                    <p class="text-sm font-myeongjo text-gray-800 line-clamp-3 leading-relaxed">"${bm.text.trim()}"</p>
-                `;
-                list.appendChild(item);
-            });
-        }
-
-        function deleteBookmarkFromPanel(id, event) {
-            event.stopPropagation();
-            const novel = library.find(n => n.id === currentNovelId);
-            if (!novel || !novel.bookmarks) return;
-
-            novel.bookmarks = novel.bookmarks.filter(b => b.id !== id);
-            saveToDB(novel);
-            renderBookmarks(); 
-            renderChapter(true); 
-            showToast("북마크가 삭제되었습니다.");
         }
 
         function setTheme(t) { settings.theme = t; applySettings(); saveSettings(); }
@@ -828,13 +529,9 @@
             const topBar = document.getElementById('viewer-top-bar');
             const bottomBar = document.getElementById('viewer-bottom-bar');
             const chapterTitle = document.getElementById('viewer-chapter-title');
-            const tocPanelContent = document.querySelector('#toc-panel > div:last-child');
-            const bookmarkPanelContent = document.querySelector('#bookmark-panel > div:last-child');
-            const settingsPanelContent = document.querySelector('#settings-panel > div:last-child');
 
             main.style.fontSize = settings.fontSize + 'px';
             document.getElementById('font-size-display').innerText = settings.fontSize + 'px';
-            
             main.className = `viewer-container font-${settings.fontFamily}`;
 
             if (isDark) {
@@ -844,10 +541,6 @@
                 chapterTitle.style.borderColor = "#333";
                 chapterTitle.style.color = "#FFFFFF";
                 document.getElementById('viewer-title').style.color = "#FFFFFF";
-                
-                if (tocPanelContent) { tocPanelContent.classList.add('viewer-dark-bg', 'viewer-dark-text'); }
-                if (bookmarkPanelContent) { bookmarkPanelContent.classList.add('viewer-dark-bg', 'viewer-dark-text'); }
-                if (settingsPanelContent) { settingsPanelContent.classList.add('viewer-dark-bg', 'viewer-dark-text'); }
             } else {
                 viewer.classList.remove('viewer-dark-bg', 'viewer-dark-text');
                 topBar.classList.remove('viewer-dark-bg', 'viewer-dark-text', 'viewer-dark-border');
@@ -855,10 +548,6 @@
                 chapterTitle.style.borderColor = "#eee";
                 chapterTitle.style.color = "#111827";
                 document.getElementById('viewer-title').style.color = "#1f2937";
-
-                if (tocPanelContent) { tocPanelContent.classList.remove('viewer-dark-bg', 'viewer-dark-text'); }
-                if (bookmarkPanelContent) { bookmarkPanelContent.classList.remove('viewer-dark-bg', 'viewer-dark-text'); }
-                if (settingsPanelContent) { settingsPanelContent.classList.remove('viewer-dark-bg', 'viewer-dark-text'); }
             }
         }
 
