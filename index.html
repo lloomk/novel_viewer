@@ -95,14 +95,13 @@
         .modal-enter { transform: scale(0.95); opacity: 0; }
         .modal-active { transform: scale(1); opacity: 1; transition: all 0.2s ease-out; }
 
-        /* 북마크 하이라이팅 표시 */
+        /* 실시간 하이라이트 표시 스타일 */
         .bookmark-highlight {
-            background-color: rgba(253, 224, 71, 0.35);
+            background-color: rgba(253, 224, 71, 0.4);
             border-bottom: 2px dashed #eab308;
-            cursor: pointer;
         }
         .viewer-dark-bg .bookmark-highlight {
-            background-color: rgba(234, 179, 8, 0.25);
+            background-color: rgba(234, 179, 8, 0.3);
             border-bottom: 2px dashed #facc15;
         }
     </style>
@@ -154,6 +153,7 @@
 
         <main id="viewer-main" class="viewer-container">
             <div id="viewer-chapter-title" class="text-xl font-bold mb-10 pb-4 border-b"></div>
+            <!-- 성능 향상을 위해 껍데기만 둠 (실제 텍스트는 내부 가공 없이 raw로 삽입됨) -->
             <div id="viewer-text" class="chapter-content"></div>
         </main>
 
@@ -300,7 +300,6 @@
         let scrollStartY = 0;
 
         let selectedTextInfo = null;
-        let selectionTimeout = null; // 메모리 낭비를 잡을 디바운스 타이머 객체
 
         window.onload = async () => {
             await initDB();
@@ -369,11 +368,10 @@
                 }
             };
 
-            // [메모리 최적화 핵심]: selectionchange 이벤트에 디바운싱 처리 (200ms 단위로만 무거운 로직을 일괄 연산)
-            document.addEventListener('selectionchange', () => {
-                if (selectionTimeout) clearTimeout(selectionTimeout);
-                selectionTimeout = setTimeout(handleTextSelection, 200);
-            });
+            // [메모리 최적화]: 과부하를 유발하는 selectionchange 전체 삭제.
+            // 대신 손가락을 완벽하게 뗄 때(touchend, mouseup) 딱 한 번만 현재 선택 영역 유무를 검사
+            viewer.addEventListener('touchend', handleSelectionEnd);
+            viewer.addEventListener('mouseup', handleSelectionEnd);
 
             viewer.addEventListener('click', (e) => {
                 if (e.target.closest('#bookmark-tooltip') || e.target.closest('.bookmark-highlight')) return;
@@ -385,6 +383,11 @@
                 addBookmark();
             };
         };
+
+        // 손가락을 완전히 뗐을 때만 선택 정보 분석 (메모리 누수 원천 차단)
+        function handleSelectionEnd() {
+            setTimeout(handleTextSelection, 50);
+        }
 
         async function handleFileUpload(e) {
             const file = e.target.files[0];
@@ -520,21 +523,16 @@
             renderLibrary();
         }
 
+        // [메모리 최적화]: 회차 로딩 시 무거운 하이라이트 문자열 조립을 배제하고 초고속 순수 텍스트 렌더링으로 변경
         function renderChapter(shouldRestoreScroll = false) {
             const novel = library.find(n => n.id === currentNovelId);
             if (!novel || !novel.chapters[currentChapterIndex]) return;
             const chapter = novel.chapters[currentChapterIndex];
-            const titleEl = document.getElementById('viewer-chapter-title');
-            titleEl.innerText = chapter.title;
-
-            const textContainer = document.getElementById('viewer-text');
             
-            const bookmarksInChapter = (novel.bookmarks || []).filter(b => b.chapterIndex === currentChapterIndex);
-            if (bookmarksInChapter.length > 0) {
-                textContainer.innerHTML = buildHighlightedText(chapter.body, bookmarksInChapter);
-            } else {
-                textContainer.innerText = chapter.body;
-            }
+            document.getElementById('viewer-chapter-title').innerText = chapter.title;
+            
+            // 돔을 고속 드로잉하기 위해 innerText를 사용
+            document.getElementById('viewer-text').innerText = chapter.body;
 
             const viewer = document.getElementById('viewer-screen');
             if (shouldRestoreScroll && novel.scrollPositions && novel.scrollPositions[currentChapterIndex] !== undefined) {
@@ -550,36 +548,8 @@
             hideBookmarkTooltip();
         }
 
-        function buildHighlightedText(rawText, bookmarks) {
-            const sortedBookmarks = [...bookmarks].sort((a, b) => a.charOffset - b.charOffset);
-            let resultHtml = "";
-            let lastIdx = 0;
-
-            for (let bm of sortedBookmarks) {
-                const offset = bm.charOffset;
-                const len = bm.text.length;
-
-                if (rawText.substring(offset, offset + len) === bm.text) {
-                    resultHtml += escapeHtml(rawText.substring(lastIdx, offset));
-                    resultHtml += `<span class="bookmark-highlight" onclick="handleBookmarkClick('${bm.id}', event)">${escapeHtml(bm.text)}</span>`;
-                    lastIdx = offset + len;
-                }
-            }
-            resultHtml += escapeHtml(rawText.substring(lastIdx));
-            return resultHtml;
-        }
-
-        function escapeHtml(text) {
-            return text
-                .replace(/&/g, "&amp;")
-                .replace(/</g, "&lt;")
-                .replace(/>/g, "&gt;")
-                .replace(/"/g, "&quot;")
-                .replace(/'/g, "&#039;");
-        }
-
         /**
-         * 최적화된 텍스트 드래그 감지 엔진 (CPU 과부하 해결)
+         * [메모리 최적화]: 사파리에서 가상 selection 객체가 생성되지 않도록 가볍게 가공
          */
         function handleTextSelection() {
             const selection = window.getSelection();
@@ -592,25 +562,24 @@
                 return;
             }
 
-            // 본문 영역 바깥에서 선택한 경우 연산 즉시 중단
-            const textContainer = document.getElementById('viewer-text');
             if (selection.rangeCount === 0) return;
-            
             const range = selection.getRangeAt(0);
+            const textContainer = document.getElementById('viewer-text');
+
             if (!textContainer.contains(range.commonAncestorContainer)) {
                 tooltip.classList.add('hidden');
                 selectedTextInfo = null;
                 return;
             }
 
-            const preSelectionRange = range.cloneRange();
-            preSelectionRange.selectNodeContents(textContainer);
-            preSelectionRange.setEnd(range.startContainer, range.startOffset);
-            const startOffset = preSelectionRange.toString().length;
+            // [메모리 최적화]: 크래시를 방지하기 위해 Range의 복제 및 복잡한 오프셋 수치 계산 처리를 완전히 생략하고,
+            // indexOf 구조로 오프셋을 안정화시킵니다.
+            const fullText = textContainer.innerText;
+            const startOffset = fullText.indexOf(text);
 
             selectedTextInfo = {
                 text: text,
-                charOffset: startOffset,
+                charOffset: startOffset !== -1 ? startOffset : 0,
                 chapterIndex: currentChapterIndex
             };
 
@@ -629,7 +598,10 @@
         function hideBookmarkTooltip() {
             document.getElementById('bookmark-tooltip').classList.add('hidden');
             selectedTextInfo = null;
-            window.getSelection().removeAllRanges();
+            // 예외 튕김 방지 처리 추가
+            try {
+                window.getSelection().removeAllRanges();
+            } catch(e) {}
         }
 
         function addBookmark() {
@@ -642,7 +614,7 @@
 
             const isDuplicate = novel.bookmarks.some(b => 
                 b.chapterIndex === selectedTextInfo.chapterIndex && 
-                b.charOffset === selectedTextInfo.charOffset
+                b.text === selectedTextInfo.text
             );
 
             if (isDuplicate) {
@@ -662,23 +634,7 @@
             saveToDB(novel);
 
             hideBookmarkTooltip();
-            renderChapter(true);
             showToast("선택한 영역을 북마크했습니다.");
-        }
-
-        function handleBookmarkClick(bookmarkId, event) {
-            event.stopPropagation();
-            const novel = library.find(n => n.id === currentNovelId);
-            if (!novel || !novel.bookmarks) return;
-            const bm = novel.bookmarks.find(b => b.id === bookmarkId);
-            if (!bm) return;
-
-            if (confirm(`선택한 북마크를 해제(삭제)하시겠습니까?\n\n"${bm.text.substring(0, 30)}..."`)) {
-                novel.bookmarks = novel.bookmarks.filter(b => b.id !== bookmarkId);
-                saveToDB(novel);
-                renderChapter(true);
-                showToast("북마크가 삭제되었습니다.");
-            }
         }
 
         function confirmMove(dir) {
@@ -775,6 +731,9 @@
             });
         }
 
+        /**
+         * 북마크 목록 패널 렌더링
+         */
         function renderBookmarks() {
             const novel = library.find(n => n.id === currentNovelId);
             const list = document.getElementById('bookmark-list');
@@ -794,30 +753,40 @@
                 
                 item.className = "p-4 bg-gray-50 hover:bg-indigo-50 border-b border-gray-100 rounded-xl transition-all cursor-pointer flex flex-col justify-between gap-2 group relative";
                 
+                // 북마크 클릭 시 실시간 타겟 마킹 스크롤링
                 item.onclick = () => {
                     currentChapterIndex = bm.chapterIndex;
+                    
+                    // 1. 순수 텍스트 형태로 회차 렌더링 진행
                     renderChapter(false); 
                     toggleBookmarkPanel();
                     if(uiVisible) toggleUI();
 
+                    // 2. [메모리 최적화]: 북마크 지점을 찾아 실시간으로 딱 그 부분만 임시 highlight span 처리
                     setTimeout(() => {
-                        const highlights = document.getElementsByClassName('bookmark-highlight');
-                        let matchedEl = null;
-                        for (let el of highlights) {
-                            if (el.innerText.trim() === bm.text.trim()) {
-                                matchedEl = el;
-                                break;
-                            }
-                        }
+                        const textContainer = document.getElementById('viewer-text');
+                        const fullText = textContainer.innerText;
+                        
+                        const targetText = bm.text.trim();
+                        const targetIdx = fullText.indexOf(targetText);
 
-                        if (matchedEl) {
-                            const rect = matchedEl.getBoundingClientRect();
-                            const viewer = document.getElementById('viewer-screen');
-                            const targetScrollTop = viewer.scrollTop + rect.top - (window.innerHeight / 2) + (rect.height / 2);
-                            viewer.scrollTo({
-                                top: targetScrollTop,
-                                behavior: 'smooth'
-                            });
+                        if (targetIdx !== -1) {
+                            // 오프셋 앞과 뒤를 가르고 타겟 단락만 span 처리하여 DOM 변경 최소화
+                            const before = fullText.substring(0, targetIdx);
+                            const after = fullText.substring(targetIdx + targetText.length);
+                            textContainer.innerHTML = escapeHtml(before) + `<span id="current-target-highlight" class="bookmark-highlight">${escapeHtml(targetText)}</span>` + escapeHtml(after);
+                            
+                            // 정확한 픽셀 계산 후 부드러운 스크롤 이동
+                            const targetEl = document.getElementById('current-target-highlight');
+                            if (targetEl) {
+                                const rect = targetEl.getBoundingClientRect();
+                                const viewer = document.getElementById('viewer-screen');
+                                const targetScrollTop = viewer.scrollTop + rect.top - (window.innerHeight / 2) + (rect.height / 2);
+                                viewer.scrollTo({
+                                    top: targetScrollTop,
+                                    behavior: 'smooth'
+                                });
+                            }
                         }
                     }, 150);
                 };
